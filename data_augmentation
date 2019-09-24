@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Sep  5 11:39:57 2019
+
+@author: fahad
+"""
+
+from keras.preprocessing.image import ImageDataGenerator, img_to_array, load_img
+import numpy as np
+import os
+import argparse
+
+ap = argparse.ArgumentParser()
+
+
+def generate(data_dir, total):
+    datagen = ImageDataGenerator(
+            rotation_range=30,
+            zoom_range=0.15,
+            width_shift_range=0.2,
+            height_shift_range=0.1,
+            shear_range=0.15,
+            horizontal_flip=True,
+            fill_mode="nearest"
+            )
+    
+    for file in os.listdir(data_dir):
+        path = os.path.join(data_dir, file)
+        for image in os.listdir(path):
+            image_file = os.path.join(data_dir, file, image)
+            print(image_file)
+            image_file = load_img(image_file)
+            image_file = img_to_array(image_file)
+            image_file = np.expand_dims(image_file, 0)
+            generator = datagen.flow(image_file, batch_size=1,save_to_dir=path, save_prefix="image", save_format="jpg")
+    
+            t = 0
+            
+            for img in generator:
+                t += 1
+                
+                if t == total:
+                    break
+                
+if __name__ =="__main__":
+    ap.add_argument("-d", "--input_dir", required=True,
+                help="Path to input directory conatain image folders")
+
+    ap.add_argument("-t", "--total", type=int, default=30,
+                help="# of generated images")
+
+    args = vars(ap.parse_args())
+    generate(data_dir=args["input_dir"], total=args["total"])
