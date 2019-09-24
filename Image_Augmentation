@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Sep  3 12:06:50 2019
+
+@author: fahad
+"""
+
+from keras.preprocessing.image import ImageDataGenerator, img_to_array, load_img
+import numpy as np
+import argparse
+
+
+ap = argparse.ArgumentParser()
+
+ap.add_argument("-i", "--image", required=True,
+                help="path to input image")
+ap.add_argument("-o", "--output", required=True,
+                help="path to the output directory to store augmentation examples")
+ap.add_argument("-t", "--total", type=int, default=100,
+                help="# number of training samples to generate")
+                
+args = vars(ap.parse_args())
+
+
+
+print("[INFO] loading example image...")
+image = load_img(args["image"])
+image = img_to_array(image,)
+image = np.expand_dims(image, 0)
+
+aug = ImageDataGenerator(
+        rotation_range=30,
+        zoom_range=0.15,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.15,
+        horizontal_flip=True,
+        fill_mode="nearest"
+        )
+
+total = 0
+
+print("[INFO] generating images...")
+imageGen = aug.flow(image, batch_size=1, save_to_dir=args["output"],
+                    save_prefix="image", save_format="jpg")
+
+for image in imageGen:
+    total += 1
+    
+    if total ==args["total"]:
+        break
