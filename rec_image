@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Sep  4 11:40:03 2019
+
+@author: fahad
+"""
+
+import os
+import math
+import os.path
+import pickle
+from PIL import Image, ImageDraw
+import face_recognition
+import argparse
+
+ap = argparse.ArgumentParser()
+
+ap.add_argument("-i", "--image_path", required=True,
+                help="path to the directory containing images")
+ap.add_argument("-m", "--model_path", required=True,
+                help="path to the trained model")
+ap.add_argument("-n", "--n_neighbors", type=int, default=1,
+                help="Number of neighbors for applying knn algorithm")
+ap.add_argument("-t", "--distance", type=float, default=0.5,
+                help="Distance threshold for face comparison")
+
+args = vars(ap.parse_args())
+
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+
+def face_distance_to_conf(face_distance, face_match_threshold=args['distance']):
+    if face_distance > face_match_threshold:
+        range = (1.0 - face_match_threshold)
+        linear_val = (1.0 - face_distance) / (range * 2.0)
+        return linear_val
+    else:
+        range = face_match_threshold
+        linear_val = 1.0 - (face_distance / (range * 2.0))
+        return linear_val + ((1.0 - linear_val) * math.pow((linear_val - 0.5) * 2, 0.2))
+
+def predict(X_img_path, knn_clf=None, model_path=args["model_path"], distance_threshold=args["distance"], n_neighbors=args["n_neighbors"]):
+
+    if not os.path.isfile(X_img_path) or os.path.splitext(X_img_path)[1][1:] not in ALLOWED_EXTENSIONS:
+        raise Exception("Invalid image path: {}".format(X_img_path))
+
+    if knn_clf is None and model_path is None:
+        raise Exception("Must supply knn classifier either thourgh knn_clf or model_path")
+
+    if knn_clf is None:
+        with open(model_path, 'rb') as f:
+            knn_clf = pickle.load(f)
+            
+    X_img = face_recognition.load_image_file(X_img_path)
+    #X_img = cv2.resize(X_img, (0, 0), fx=0.5, fy=0.5)
+    X_face_locations = face_recognition.face_locations(X_img, model="cnn")
+
+    if len(X_face_locations) == 0:
+        return []
+
+    faces_encodings = face_recognition.face_encodings(X_img, known_face_locations=X_face_locations)
+    closest_distances = knn_clf.kneighbors(faces_encodings, n_neighbors=n_neighbors)
+    distances = [closest_distances[0][i][0] for i in range(len(X_face_locations))]
+    accuracies = [face_distance_to_conf(distance, distance_threshold) for distance in distances]
+    are_matches = [distance <= distance_threshold for distance in distances]
+    #are_matches = [closest_distances[0][i][0] <= distance_threshold for i in range(len(X_face_locations))]
+
+    return [(pred, loc, acc) if rec else ("Outsider",loc, acc) for pred, loc, rec, acc in zip(knn_clf.predict(faces_encodings), X_face_locations, are_matches, accuracies)]
+
+
+def show_prediction_labels_on_image(img_path, predictions):
+    
+#    image = cv2.imread(img_path)
+#    for name, (top, right, bottom, left), acc in predictions:
+#        acc = acc*100
+#        label = name + f"{acc:.4f}"
+#        cv2.rectangle(image, (left, top), (right, bottom), (0, 255, 0), 4)
+#        cv2.rectangle(image, (left, bottom+35), (right + 50, bottom), (0, 0, 255), cv2.FILLED)
+#        font = cv2.FONT_HERSHEY_COMPLEX
+#        cv2.putText(image, label, (left+6, bottom+20), font, 1, (100, 100, 100), 2)
+#    cv2.imshow("Image", image)
+#    cv2.waitKey(0)
+    
+    pil_image = Image.open(img_path).convert("RGB")
+    draw = ImageDraw.Draw(pil_image)
+
+    for name, (top, right, bottom, left), acc in predictions:
+        #top, right, bottom, left = top*2, right*2, bottom*2, left*2
+        draw.rectangle(((left, top), (right, bottom)), outline=(0, 0, 255))
+
+        name = name.encode("UTF-8")
+
+        text_width, text_height = draw.textsize(name)
+        draw.rectangle(((left, bottom - text_height - 10), (right, bottom)), fill=(0, 0, 255), outline=(0, 0, 255))
+        draw.text((left + 6, bottom - text_height - 5), name, fill=(255, 255, 255, 255))
+
+    del draw
+
+    pil_image.show()
+#    
+    
+def test(path):
+    for image_file in os.listdir(path):
+        full_file_path = os.path.join(path, image_file)
+
+        print("Looking for faces in {}".format(image_file))
+
+        predictions = predict(full_file_path, model_path=args['model_path'])
+        print(predictions)
+
+        for name, (top, right, bottom, left), acc in predictions:
+            print("- Found {} at ({}, {} with accuracy: {})".format(name, left, top, acc))
+
+        show_prediction_labels_on_image(os.path.join(path, image_file), predictions)
+        
+        
+if __name__ == "__main__":
+    path = args["image_path"]
+    test(path)
+        
