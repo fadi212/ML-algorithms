@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Sep  4 10:55:55 2019
+
+@author: fahad
+"""
+
+import argparse
+import pickle
+import face_recognition
+import cv2
+import math
+
+ap = argparse.ArgumentParser()
+
+ap.add_argument("-m", "--model_path", required=True,
+                help="Path to the trained model file")
+
+ap.add_argument("-v", "--video",type=str,default=0,
+                help="path to the video file")
+ap.add_argument("-d", "--distance", type=float, default=0.5,
+                help="Distance threshold for face comparison")
+ap.add_argument("-n", "--n_neighbors", type=int, default=1,
+                help="Nearest Neighbors to Consider")
+
+args = vars(ap.parse_args())
+
+def face_distance_to_conf(face_distance, face_match_threshold=args['distance']):
+    if face_distance > face_match_threshold:
+        range = (1.0 - face_match_threshold)
+        linear_val = (1.0 - face_distance) / (range * 2.0)
+        return linear_val
+    else:
+        range = face_match_threshold
+        linear_val = 1.0 - (face_distance / (range * 2.0))
+        return linear_val + ((1.0 - linear_val) * math.pow((linear_val - 0.5) * 2, 0.2))
+
+def predict(X_img_path, knn_clf=None, model_path=args["model_path"], distance_threshold=args["distance"], n_neighbors=args["n_neighbors"]):
+
+    if knn_clf is None and model_path is None:
+        raise Exception("Must supply knn classifier either thourgh knn_clf or model_path")
+
+    if knn_clf is None:
+        with open(model_path, 'rb') as f:
+            knn_clf = pickle.load(f)
+    X_img_path = cv2.resize(X_img_path, (0, 0), fx=0.5, fy=0.5)
+    X_face_locations = face_recognition.face_locations(X_img_path, model="cnn")
+
+    if len(X_face_locations) == 0:
+        return []
+
+    faces_encodings = face_recognition.face_encodings(X_img_path, known_face_locations=X_face_locations)
+    closest_distances = knn_clf.kneighbors(faces_encodings, n_neighbors=n_neighbors)
+    distances = [closest_distances[0][i][0] for i in range(len(X_face_locations))]
+    accuracies = [face_distance_to_conf(distance, distance_threshold) for distance in distances]
+    are_matches = [distance <= distance_threshold for distance in distances]
+    
+    return [(pred, loc, acc) if rec else ("Outsider",loc, acc) for pred, loc, rec, acc in zip(knn_clf.predict(faces_encodings), X_face_locations, are_matches, accuracies)]
+
+
+
+
+cap = cv2.VideoCapture(args["video"])
+
+codec = cv2.VideoWriter_fourcc("X", "V", "I", "D")
+fps = 30
+res = (640, 480)
+filename = "recognition.avi"
+
+out = cv2.VideoWriter(filename, codec, fps, res)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    predictions = predict(frame, model_path=args["model_path"], distance_threshold=args["distance"])
+    
+    for name, (top, right, bottom, left), acc in predictions:
+        print("- Found {} at ({}, {} with accuracy: {})".format(name, left, top, acc))
+        top, right, bottom, left = top*2, right*2, bottom*2, left*2
+        cv2.rectangle(frame, (left, top), (right,bottom), (0, 255, 0), 2)
+        
+        cv2.rectangle(frame, (left, bottom-35), (right, bottom), (0, 0, 255), cv2.FILLED)
+        font = cv2.FONT_HERSHEY_COMPLEX
+        cv2.putText(frame, name, (left+6, bottom-6), font, 1, (100, 100, 100), 2)
+        
+        
+    out.write(frame)
+    cv2.imshow("Frame", frame)
+    if cv2.waitKey(5) & 0xFF == ord("q"):
+        break
+
+out.release()    
+cap.release()
+cv2.destroyAllWindows()
